@@ -3,16 +3,15 @@ import os
 from dotenv import load_dotenv
 import random
 
-# ✅ Load environment variables from .env
+# ✅ Load environment variables
 load_dotenv()
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 model = genai.GenerativeModel(model_name="gemini-1.5-pro-latest")
 
-# 🧠 Startup Questions
+# ✅ Define Questions
 questions = {
     "startup_name": "What is the name of your startup?",
     "one_liner": "Give a one-liner description of your startup. (Optional)",
-    "category":"what category you idea falls on ?"
     "problem_statement": "What problem are you solving?",
     "solution": "How does your product/service solve this problem?",
     "target_audience": "Who is your target customer?",
@@ -23,95 +22,77 @@ questions = {
     "founder_background": "Tell us about your background and why you're the right person to build this."
 }
 
-# ✅ Fuzzy keyword sets
-keyword_map = {
-    "target_audience": ["patients", "users", "diabetes", "customers", "people", "clients"],
-    "business_model": ["mobile", "android", "ios", "web", "platform", "app", "deliver"],
-    "revenue_model": ["yes", "subscription", "₹", "payment", "fee", "price"]
-}
+# ✅ One-time re-ask tracker
+reask_tracker = {}
 
-# 🧠 Smart response clarity checker
-def is_response_clear(key, question, answer):
-    answer_lower = answer.strip().lower()
-
-    affirmatives = ["yes", "yeah", "yup", "correct", "exactly", "that's right", "sure", "yep", "affirmative", "true"]
-    if answer_lower in affirmatives:
-        return "clear"
-
-    if key in ["startup_name", "one_liner"] and answer:
-        return "clear"
-
-    if len(answer_lower) >= 10 and any(word in answer_lower for word in ["glucose", "ai", "meal", "predict", "diabetes"]):
-        return "clear"
-
-    if key in keyword_map and any(keyword in answer_lower for keyword in keyword_map[key]):
-        return "clear"
-
-    if len(answer_lower) < 10:
-        return "vague:Can you elaborate on that a bit more so we fully understand your idea?"
-
-    try:
-        prompt = f"""
-You're helping collect a startup idea. Here's the context:
-
-Question: "{question}"
-User's Answer: "{answer}"
-
-Decide if the answer is acceptable. If it gives a clear direction, say "clear".
-If it's vague or needs more explanation, say:
-"vague:<rephrase to get better answer>"
-
-Respond with:
-- "clear"
-OR
-- "vague:<rephrased_question>"
-"""
-        response = model.generate_content(prompt)
-        return response.text.strip()
-    except Exception as e:
-        print(f"⚠️ Skipping validation due to error: {e}")
-        return "clear"
-
-# 🔁 Friendly follow-up prompts
+# ✅ Follow-up templates
 follow_up_templates = [
     "🤖 Hmm, I think I missed part of that. Could you clarify?\n👉 {rephrased}",
     "🤖 Cool — just one more thing I’m curious about…\n👉 {rephrased}",
-    "🤖 Nice! That gives me a good picture, but…\n👉 {rephrased}",
-    "🤖 That's interesting. Can you add more detail?\n👉 {rephrased}",
-    "🤖 Okay got it. Out of curiosity, how are you planning to…\n👉 {rephrased}",
-    "🤖 Just to be sure — would you mind elaborating?\n👉 {rephrased}",
-    "🤖 Got it! Could you expand a little more?\n👉 {rephrased}"
+    "🤖 Okay got it. Out of curiosity, how are you planning to…\n👉 {rephrased}"
 ]
 
 def friendly_prompt(rephrased):
     return random.choice(follow_up_templates).format(rephrased=rephrased)
 
-# 📥 Interactive idea collector
+# ✅ Smart Clarity Check
+def is_response_clear(key, question, answer):
+    answer = answer.strip().lower()
+    if len(answer) > 15:
+        return "clear"
+
+    # Basic heuristic fallback
+    if len(answer) < 5:
+        return f"vague:{question} (Can you explain a bit more?)"
+
+    # Gemini fallback for subtle cases
+    try:
+        prompt = f"""
+You're helping collect a startup idea.
+
+Question: "{question}"
+Answer: "{answer}"
+
+Is the answer clear? Say 'clear' or return vague:<rephrased question>
+"""
+        response = model.generate_content(prompt)
+        return response.text.strip()
+    except Exception as e:
+        print(f"⚠️ Skipping Gemini validation due to error: {e}")
+        return "clear"
+
+# ✅ Input collector with smart clarification
 def enhanced_idea_collector():
     responses = {}
+
     for key, question in questions.items():
+        has_reasked = False
+
         while True:
             user_input = input(f"{question}\n> ").strip()
-            eval_result = is_response_clear(key, question, user_input)
+            clarity = is_response_clear(key, question, user_input)
 
-            if eval_result.lower() == "clear":
+            if clarity == "clear":
                 responses[key] = user_input
                 break
-            elif eval_result.startswith("vague:"):
-                rephrased = eval_result.split("vague:")[1].strip()
+            elif clarity.startswith("vague:") and not has_reasked:
+                rephrased = clarity.split("vague:")[1]
                 print(friendly_prompt(rephrased))
+                has_reasked = True
             else:
-                print("❗ Unexpected response. Please try again.")
+                print("🔁 Thanks, moving on.")
+                responses[key] = user_input
+                break
     return responses
 
-# 📊 Final analysis using Gemini
+# ✅ Final summary
 def run_final_summary(responses):
     prompt = f"""
-You are a smart startup summarizer agent. Based on the following collected inputs from a founder, generate a structured JSON summary without judgment or validation.
+You are a smart startup summarizer. Based on this input, return a clean JSON summary:
 
 {responses}
 
-Return only:
+Return:
 - startup_name
 - one_liner
 - problem_statement
@@ -129,7 +110,7 @@ Return only:
     except Exception as e:
         return f"❗ Error during summary: {e}"
 
-# 🚀 Run the product flow
+# 🚀 Run the flow
 if __name__ == "__main__":
     data = enhanced_idea_collector()
     print("\n✅ Generating your startup summary...\n")
